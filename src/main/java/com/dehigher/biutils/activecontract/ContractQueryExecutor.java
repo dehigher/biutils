@@ -48,11 +48,11 @@ public class ContractQueryExecutor {
 
     private long lastBlockNumber = 0;
 
-    private long period;
+    private final long period;
 
-    private Thread thread;
+    private final Thread thread = new Thread(()-> run());
 
-    private ContractAnalysisExecutor analysisExecutor;
+    private final ContractAnalysisExecutor analysisExecutor = new ContractAnalysisExecutor();
 
 
     public ContractQueryExecutor(long period) {
@@ -65,9 +65,7 @@ public class ContractQueryExecutor {
      * 启动线程
      */
     public void start(){
-        thread = new Thread(()-> run());
         thread.start();
-        analysisExecutor = new ContractAnalysisExecutor();
     }
 
     private String run(){
@@ -154,7 +152,7 @@ public class ContractQueryExecutor {
      */
     private List<ActiveContractItem.Item> getContracts(long startBlock, long endBlock, int pageNo, int pageSize){
         List<ActiveContractItem.Item> contracts = null;
-        for(int i = 0; i < covalentKeys.length; i++){
+        while (true){
             String key = getCovalentKey();
             try{
                 contracts = getContracts(key, startBlock, endBlock, pageNo, pageSize);
@@ -162,6 +160,7 @@ public class ContractQueryExecutor {
                 sleep(1500);
                 if(currentCovalentKeyIndex >= covalentKeys.length){
                     currentCovalentKeyIndex = 0;
+                    logger.info("获取合约出错，已经重试一轮还是失败，换key也无效，需要人工介入，暂时继续重试");
                 } else{
                     currentCovalentKeyIndex ++;
                 }
@@ -169,11 +168,6 @@ public class ContractQueryExecutor {
             if(contracts != null){
                 break;
             }
-        }
-
-        if(contracts == null){
-            // TODO push message
-            throw new RuntimeException("获取合约出错，已经重试还是失败，换key也无效，需要人工介入");
         }
         return contracts;
     }
