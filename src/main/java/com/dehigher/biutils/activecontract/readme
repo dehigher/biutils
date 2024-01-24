@@ -1,0 +1,27 @@
+1. 异动榜
+出现在两轮数据
+【价格】增长15%
+【交易金额】增长4倍以上
+
+
+2. 榜单
+基于一轮数据
+基于【交易次数】次数排前10
+
+
+3. call
+【交易次数榜】= 3次上榜，并且每次【交易量榜】< 4
+
+
+
+-----------
+价格：pairs[0].priceUsd
+5m交易金额：pairs[0].volume.m5
+5m交易次数：pairs[0].txns.m5 (buys + sells)
+合约创建时间：pairs[0].pairCreatedAt
+----------
+
+
+res['price_change_5m'] = price_change_5m
+res['price_change_24h'] = price_change_24h
+res['cur_liquidity'] = cur_liquidity
