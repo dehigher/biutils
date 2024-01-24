@@ -58,12 +58,15 @@ public class BaseTest {
         Map<String, String> headers = new HashMap<>();
         headers.put("Content-Type", "application/json");
         headers.put("Authorization", "Bearer " + key);
-        long endBlockNumber = getCurrentBlockNumber() - 3;
-        long startBlockNumber = endBlockNumber -2;
-        String ret = HttpUtils.sendGetRequest(httpClient, String.format(url, startBlockNumber, endBlockNumber), headers);
-        System.out.println("=====ret=====");
-        System.out.println(ret);
-        System.out.println("============");
+        long endBlockNumber = getCurrentBlockNumber();
+        long pointBlockNumber = endBlockNumber - 20;
+        while (pointBlockNumber <= endBlockNumber){
+            String ret = HttpUtils.sendGetRequest(httpClient, String.format(url, pointBlockNumber, pointBlockNumber + 1), headers);
+            System.out.println("=====ret,block Number: " + pointBlockNumber + "=====");
+            System.out.println(ret);
+            System.out.println("============");
+            pointBlockNumber ++;
+        }
     }
 
     @Test

@@ -10,7 +10,7 @@ public class TimeUtils {
 
 
     public static long time2stamp(String formatter, String timestr) {
-        LocalDateTime localDateTime = LocalDateTime.parse(timestr, DateTimeFormatter.ofPattern(formatter));
+        LocalDateTime localDateTime = LocalDateTime.parse(timestr, DateTimeFormatter.ISO_DATE_TIME);
         Instant instant = localDateTime.toInstant(ZoneOffset.UTC);
         long timestamp = instant.toEpochMilli();
         return timestamp;

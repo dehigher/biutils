@@ -20,7 +20,7 @@ public class ContractQueryExecutor {
 
     private static final int MAX_QUEUE_SIZE = 20000;
 
-
+    private static final FixedSizeQueue<ActiveContractItem.Item> container = new FixedSizeQueue<>(MAX_QUEUE_SIZE);
 
     private static final HttpClient httpClient = HttpUtils.createHttpClient(2, 2, 10000, 10000, 10000);
 
@@ -41,12 +41,13 @@ public class ContractQueryExecutor {
         BLACK_ADDRESS_LIST.add("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2");
     }
 
-
     private int currentCovalentKeyIndex = 0;
 
-    private long nextPeriodStartTime = 0;
+    private long startTime = 0;
 
-    private long lastBlockNumber = 0;
+    private long tickTime = 10 * 1000;
+
+    private long pointBlockNumber = 0;
 
     private final long period;
 
@@ -54,12 +55,9 @@ public class ContractQueryExecutor {
 
     private final ContractAnalysisExecutor analysisExecutor = new ContractAnalysisExecutor();
 
-
     public ContractQueryExecutor(long period) {
         this.period = period;
     }
-
-
 
     /**
      * 启动线程
@@ -69,20 +67,39 @@ public class ContractQueryExecutor {
     }
 
     private String run(){
+        pointBlockNumber = getCurrentBlockNumber() - 3;
         // 到了执行事件, 更新轮次数据, 5分钟执行一次
         while(true){
-            long current = System.currentTimeMillis();
-            if(nextPeriodStartTime == 0 || current >= nextPeriodStartTime){
-                List<ActiveContractItem.Item> contracts = getContractsPerRound();
-                Set<String> ret = filterContract(contracts);
-                FileUtil.writeToFile(JacksonUtils.toJson(ret), "contracts/last_5m_" + lastBlockNumber + "_" + TimeUtils.format(current));
-                // 添加队列
-                analysisExecutor.addJob(ret);
-                updateNextStartTime(current);
-            }else{
-                sleep(500);
+            run(pointBlockNumber);
+        }
+    }
+
+    private void run(long startBlockNumber) {
+        long blockTimestamp = 0;
+        while (true){
+            List<ActiveContractItem.Item> contractsOfBlock = getContractsOfBlock(startBlockNumber);
+            blockTimestamp = TimeUtils.time2stamp("YYYY-MM-ddThh:mm:ssZ", contractsOfBlock.get(0).getBlock_signed_at());
+            if(startTime == 0 && pointBlockNumber == startBlockNumber){
+                startTime = blockTimestamp;
+                continue;
+            }
+            if((blockTimestamp - startTime) > period) {
+               break;
+            }else {
+                pointBlockNumber ++;
+                container.enqueue(contractsOfBlock);
             }
         }
+
+        // 提交任务
+        List<ActiveContractItem.Item> all = container.getAllElements();
+        Set<String> ret = filterContract(all);
+        analysisExecutor.addJob(ret);
+        FileUtil.writeToFile(JacksonUtils.toJson(ret), "contracts/last_5m_" + startTime + "_" + TimeUtils.format(blockTimestamp));
+
+        // 更新下一个轮多时间
+        pointBlockNumber ++; // 多一个块
+        startTime += tickTime; // 更新下一轮开始时间
     }
 
     /**
@@ -95,33 +112,10 @@ public class ContractQueryExecutor {
                 .collect(Collectors.toSet());
     }
 
-    private void updateNextStartTime(long taskStartTime) {
-        long taskFinishedTime = System.currentTimeMillis();
-        long nextTime = taskStartTime + period;
-        if(taskFinishedTime >= nextTime){
-            nextPeriodStartTime = taskFinishedTime + 1000; // 延迟一秒
-        }else{
-            nextPeriodStartTime = nextTime;
-        }
-    }
-
     /**
-     * 获取一轮的数据
+     * 获取一个块的数据
      */
-    private List<ActiveContractItem.Item> getContractsPerRound() {
-        // block period
-        long endBlockNumber = getCurrentBlockNumber() - 3;
-        long startBlockNumber;
-        if(lastBlockNumber == 0){
-            startBlockNumber = endBlockNumber - 2;
-        }else {
-            startBlockNumber = lastBlockNumber + 1;
-        }
-
-        if(endBlockNumber < startBlockNumber){
-            logger.warn("获取block number, 发现end < start, 可能是时间间隔太小，没有出块， start:[{}], end:[{}]", startBlockNumber, endBlockNumber);
-            return Collections.emptyList();
-        }
+    private List<ActiveContractItem.Item> getContractsOfBlock(long pointBlockNumber) {
 
         int pageNo = 0;
         int pageSize = 500;
@@ -129,23 +123,19 @@ public class ContractQueryExecutor {
         boolean nf = true;
 
 
-        FixedSizeQueue<ActiveContractItem.Item> container =  new FixedSizeQueue<>(MAX_QUEUE_SIZE);
-
+        ArrayList<ActiveContractItem.Item> ret = new ArrayList<>();
         while (nf){
-            List<ActiveContractItem.Item> contracts = getContracts(startBlockNumber, endBlockNumber, pageNo, pageSize);
-            if(contracts.size() > 0 && pageNo<=maxPage) {
+            List<ActiveContractItem.Item> contracts = getContracts(pointBlockNumber, pointBlockNumber + 1, pageNo, pageSize);
+            if(contracts.size() > 0 && pageNo <= maxPage) {
                 pageNo ++;
-                container.enqueue(contracts);
+                ret.addAll(contracts);
             }else {
                 nf = false;
             }
         }
-
-        // 更新轮次
-        lastBlockNumber = endBlockNumber;
-
-        return container.getAllElements();
+        return ret;
     }
+
 
     /**
      * 处理换CovalentKey
@@ -177,13 +167,14 @@ public class ContractQueryExecutor {
         long ret = 0;
         while (ret == 0){
             try {
-                Web3j web3j = Web3j.build(new HttpService("https://mainnet.infura.io/v3/472152e2fab6485e89429bc399b92fdc"));
+                // Web3j web3j = Web3j.build(new HttpService("https://mainnet.infura.io/v3/472152e2fab6485e89429bc399b92fdc"));
+                Web3j web3j = Web3j.build(new HttpService("https://rpc.notadegen.com/eth"));
                 BigInteger blockNumber = web3j.ethBlockNumber().send().getBlockNumber();
                 logger.info("Block number: " + blockNumber);
                 ret = blockNumber.longValue();
             }catch (Exception e){
                 // 重试
-                logger.warn("获取块高失败");
+                logger.warn("获取块高失败: message:" + e.getMessage());
             }
         }
         return ret;

@@ -44,15 +44,16 @@ public class ContractAnalysisExecutor {
     private Thread thread;
 
     // 定义查询的线程池
-    private static final ThreadPoolExecutor getContractDetailThreadPoolExecutor = new ThreadPoolExecutor(
-                1, 1, 30, TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(50),
+    private static final ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                5, 30, 30, TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(2000),
                 new ThreadFactoryBuilder().setNameFormat("handle-getContract-pool-%d").build(),
                 new ThreadPoolExecutor.AbortPolicy());
     static {
-        getContractDetailThreadPoolExecutor.prestartCoreThread();
+        executor.prestartCoreThread();
     }
 
+    private static final ExecutorCompletionService poolService = new ExecutorCompletionService<>(executor);
 
     public ContractAnalysisExecutor(){
         thread = new Thread(()->run());
@@ -68,14 +69,14 @@ public class ContractAnalysisExecutor {
         try{
             while (true) {
                 Set<String> addresses = taskQueue.dequeue();
-                if(addresses == null) {
+                if(addresses == null || addresses.size() == 0) {
                     sleep(500);
                     continue;
                 }
                 long start = System.currentTimeMillis();
                 log.info("分析数据开始时间：{}, 待处理数据条数：{}", TimeUtils.format(start), addresses.size());
                 handleJob(addresses);
-                handleTopPush(); // 榜单推送
+                handleTopPush(addresses); // 榜单推送
                 handleYiDongPush(); // 推送异动
                 handleCallPush(); // 推动call
                 long finish = System.currentTimeMillis();
@@ -92,10 +93,11 @@ public class ContractAnalysisExecutor {
     /**
      * 功能一：榜单推送
      */
-    private void handleTopPush() {
+    private void handleTopPush(Set<String> addresses) {
         List<TopItem> collect = currentTxTop.values().stream().sorted(Comparator.comparing(TopItem::getTxnsm5m).reversed()).collect(Collectors.toList());
         // TODO 推送
         System.out.println("===========================功能一：榜单推送=====================================");
+        System.out.println("address size:" + addresses.size());
         System.out.println(JacksonUtils.toJson(collect));
     }
 
@@ -152,13 +154,30 @@ public class ContractAnalysisExecutor {
         currentDataMap = new HashMap<>();
 
         for(String address : addresses){
-             handleContract(currentDataMap, txTop, voTop,address);
+           poolService.submit(() -> handleContract(currentDataMap, txTop, voTop, address));
+        }
+
+        try {
+            for (int i = 0; i < addresses.size(); i++) {
+                Future<Integer> completedFuture = poolService.take();
+                try {
+                    completedFuture.get(6, TimeUnit.SECONDS);
+                } catch (TimeoutException e) {
+                    completedFuture.cancel(true);
+                    log.warn("获取详情超时, err_message:" + e.getMessage());
+                }
+            }
+        } catch (InterruptedException | ExecutionException e) {
+            log.error("多线程从老鹰查询合约详情出错，err_message:" + e.getMessage());
+        }
+
+        if(txTop.size() == 0){
+             System.out.println("=====");
         }
 
         // 保存结果: type 1-tx 、2-vo
         saveResult(txTop, 1);
         saveResult(voTop, 2);
-
 
         // // 设置轮次信息
         TopItemElement[] items = txTop.toArray(new TopItemElement[0]);
